@@ -5,6 +5,8 @@
   height: 100dvh;
   overflow: hidden;
   position: relative;
+  background: var(--bg);
+  transition: background 0.2s, color 0.2s;
 }
 
 /* ===== SIDEBAR ===== */
@@ -16,14 +18,14 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: transform 0.25s ease;
+  transition: transform 0.25s ease, background 0.2s;
 }
 
 .sidebar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
@@ -32,6 +34,30 @@
   font-weight: 600;
   font-size: 16px;
   color: var(--text);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+
+.icon-btn:hover {
+  background: var(--border);
 }
 
 .new-chat-btn {
@@ -80,7 +106,7 @@
 }
 
 .chat-item.active {
-  background: #e0e7ff;
+  background: rgba(37, 99, 235, 0.12);
 }
 
 .chat-title {
@@ -92,7 +118,6 @@
   flex: 1;
 }
 
-/* Inputfelt til omdøbning af chat */
 .rename-input {
   flex: 1;
   font-size: 13px;
@@ -122,7 +147,7 @@
   opacity: 1;
 }
 
-/* ===== TOPBAR (synlig på mobil) ===== */
+/* ===== TOPBAR (mobil) ===== */
 .topbar {
   display: none;
   align-items: center;
@@ -130,6 +155,7 @@
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  background: var(--bg);
 }
 
 .hamburger {
@@ -149,9 +175,9 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
 }
 
-/* Mørkt overlay bag sidebjælken på mobil */
 .sidebar-overlay {
   display: none;
   position: fixed;
@@ -166,6 +192,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--bg);
 }
 
 .messages {
@@ -201,6 +228,8 @@
 /* ===== BESKEDER ===== */
 .message {
   display: flex;
+  align-items: flex-end;
+  gap: 6px;
 }
 
 .message.user {
@@ -233,7 +262,26 @@
   border-bottom-left-radius: 4px;
 }
 
-/* ===== MARKDOWN STYLING ===== */
+/* Kopier-knap på beskeder */
+.copy-msg-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin-bottom: 4px;
+}
+
+.message:hover .copy-msg-btn {
+  opacity: 1;
+}
+
+/* ===== MARKDOWN ===== */
 .bubble p { margin: 0 0 8px; }
 .bubble p:last-child { margin-bottom: 0; }
 .bubble ul, .bubble ol { padding-left: 20px; margin: 8px 0; }
@@ -242,27 +290,17 @@
   margin: 12px 0 6px;
   font-weight: 600;
   line-height: 1.3;
+  color: var(--text);
 }
 .bubble h1 { font-size: 18px; }
 .bubble h2 { font-size: 16px; }
 .bubble h3 { font-size: 14px; }
 .bubble code {
-  background: rgba(0,0,0,0.08);
+  background: rgba(128,128,128,0.15);
   padding: 2px 5px;
   border-radius: 4px;
   font-size: 13px;
   font-family: ui-monospace, Consolas, monospace;
-}
-.bubble pre {
-  background: rgba(0,0,0,0.08);
-  padding: 10px 12px;
-  border-radius: 8px;
-  overflow-x: auto;
-  margin: 8px 0;
-}
-.bubble pre code {
-  background: none;
-  padding: 0;
 }
 .bubble strong { font-weight: 600; }
 .bubble a { color: var(--accent); }
@@ -271,6 +309,66 @@
   margin: 8px 0;
   padding-left: 12px;
   color: var(--text-muted);
+}
+.bubble table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.bubble th, .bubble td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.bubble th {
+  background: rgba(128,128,128,0.1);
+  font-weight: 600;
+}
+
+/* ===== KODEBLOKKE MED SYNTAX HIGHLIGHTING ===== */
+.code-block {
+  margin: 8px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.code-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: rgba(128,128,128,0.1);
+  border-bottom: 1px solid var(--border);
+}
+
+.code-lang {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+.copy-code-btn {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.copy-code-btn:hover {
+  background: var(--border);
+}
+
+/* Fjerner standard padding fra syntax highlighter */
+.code-block > div {
+  margin: 0 !important;
+  border-radius: 0 !important;
 }
 
 /* ===== TYPING INDIKATOR ===== */
@@ -305,6 +403,7 @@
   gap: 8px;
   align-items: flex-end;
   flex-shrink: 0;
+  background: var(--bg);
 }
 
 .input-area textarea {
@@ -316,11 +415,12 @@
   font-family: var(--sans);
   font-size: 14px;
   color: var(--text);
-  background: var(--bg);
+  background: var(--bg2);
   outline: none;
   max-height: 160px;
   line-height: 1.5;
   transition: border-color 0.15s;
+  overflow-y: auto;
 }
 
 .input-area textarea:focus {
@@ -355,7 +455,6 @@
 
 /* ===== MOBIL ===== */
 @media (max-width: 640px) {
-  /* Skjul sidebjælken som standard på mobil */
   .sidebar {
     position: fixed;
     left: 0;
@@ -365,18 +464,15 @@
     transform: translateX(-100%);
   }
 
-  /* Vis sidebjælken når den er åben */
   .sidebar.open {
     transform: translateX(0);
-    box-shadow: 4px 0 20px rgba(0,0,0,0.1);
+    box-shadow: 4px 0 20px rgba(0,0,0,0.15);
   }
 
-  /* Vis overlay på mobil */
   .sidebar-overlay {
     display: block;
   }
 
-  /* Vis topbar med hamburger-menu */
   .topbar {
     display: flex;
   }

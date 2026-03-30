@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import './App.css'
 
 // Groq API endpoint og nøgle fra .env filen
@@ -28,7 +30,7 @@ export default function App() {
   const [activeChatId, setActiveChatId] = useState(() => loadChats()[0].id)
   // Teksten brugeren skriver i inputfeltet
   const [input, setInput] = useState('')
-  // true mens vi venter på svar fra AI
+  // true mens vi venter på / streamer svar fra AI
   const [loading, setLoading] = useState(false)
   // ID på den chat der er ved at blive omdøbt (null = ingen)
   const [renamingId, setRenamingId] = useState(null)
@@ -36,15 +38,23 @@ export default function App() {
   const [renameValue, setRenameValue] = useState('')
   // true når sidebjælken er åben på mobil
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Mørkt eller lyst tema
+  const [darkMode, setDarkMode] = useState(() => localStorage.getItem('theme') === 'dark')
   // Bruges til at scrolle ned til den nyeste besked automatisk
   const bottomRef = useRef(null)
+
+  // Sætter tema-klasse på <html> elementet og gemmer valget
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', darkMode ? 'dark' : 'light')
+    localStorage.setItem('theme', darkMode ? 'dark' : 'light')
+  }, [darkMode])
 
   // Gemmer chats i localStorage hver gang de ændrer sig
   useEffect(() => {
     localStorage.setItem('chats', JSON.stringify(chats))
   }, [chats])
 
-  // Scroller ned til bunden hver gang der kommer en ny besked
+  // Scroller ned til bunden hver gang der kommer nyt indhold
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chats, activeChatId])
@@ -57,22 +67,22 @@ export default function App() {
     setChats(prev => prev.map(c => c.id === id ? updater(c) : c))
   }
 
-  // Sender brugerens besked og henter svar fra AI
+  // Sender brugerens besked og streamer svar fra AI
   async function sendMessage() {
     const text = input.trim()
-    // Gør ingenting hvis inputtet er tomt eller AI er ved at svare
     if (!text || loading) return
 
     const userMsg = { role: 'user', text }
     setInput('')
     setLoading(true)
-    setSidebarOpen(false) // Luk sidebjælken på mobil når man sender
+    setSidebarOpen(false)
 
-    // Tilføjer brugerens besked til chatten og sætter titlen på den første besked
-    updateChat(activeChat.id, c => ({
+    // Tilføjer brugerens besked og en tom AI-besked som vi fylder ud under streaming
+    const currentChatId = activeChat.id
+    updateChat(currentChatId, c => ({
       ...c,
       title: c.messages.length === 0 ? text.slice(0, 30) : c.title,
-      messages: [...c.messages, userMsg]
+      messages: [...c.messages, userMsg, { role: 'assistant', text: '' }]
     }))
 
     try {
@@ -82,46 +92,72 @@ export default function App() {
         content: m.text
       }))
 
-      // Sender anmodning til Groq API
+      // Sender anmodning til Groq API med streaming aktiveret
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_KEY}` // API nøgle til godkendelse
+          'Authorization': `Bearer ${API_KEY}`
         },
         body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile', // AI-modellen vi bruger
+          model: 'llama-3.3-70b-versatile',
+          stream: true, // Aktiverer streaming — svar kommer løbende
           messages: [
-            // System-prompt: fortæller AI'en at den skal svare på dansk
             { role: 'system', content: 'Du er en hjælpsom assistent. Svar altid på dansk, uanset hvilket sprog brugeren skriver på.' },
-            ...history,                      // Tidligere beskeder i samtalen
-            { role: 'user', content: text }  // Den nye besked fra brugeren
+            ...history,
+            { role: 'user', content: text }
           ]
         })
       })
-      const data = await res.json()
 
-      // Kaster en fejl hvis API'et returnerer en fejlkode
       if (!res.ok) {
+        const data = await res.json()
         throw new Error(`Fejl ${res.status}: ${data.error?.message ?? 'Ukendt fejl'}`)
       }
 
-      // Udtrækker svaret fra AI'ens svar
-      const reply = data.choices?.[0]?.message?.content ?? 'Ingen svar modtaget.'
+      // Læser den løbende datastrøm fra API'et
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let fullReply = ''
 
-      // Tilføjer AI'ens svar til chatten
-      updateChat(activeChat.id, c => ({
-        ...c,
-        messages: [...c.messages, { role: 'assistant', text: reply }]
-      }))
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        // Dekoder den binære chunk til tekst
+        const chunk = decoder.decode(value, { stream: true })
+
+        // Groq sender data som "data: {...}\n\n" linjer (SSE format)
+        const lines = chunk.split('\n').filter(l => l.startsWith('data: '))
+
+        for (const line of lines) {
+          const json = line.replace('data: ', '')
+          if (json === '[DONE]') break // Streaming er færdig
+
+          try {
+            const parsed = JSON.parse(json)
+            // Udtrækker det nye stykke tekst fra svaret
+            const delta = parsed.choices?.[0]?.delta?.content ?? ''
+            if (delta) {
+              fullReply += delta
+              // Opdaterer AI's besked løbende mens teksten streamer ind
+              updateChat(currentChatId, c => {
+                const msgs = [...c.messages]
+                msgs[msgs.length - 1] = { role: 'assistant', text: fullReply }
+                return { ...c, messages: msgs }
+              })
+            }
+          } catch {}
+        }
+      }
     } catch (err) {
-      // Viser fejlbeskeden i chatten hvis noget gik galt
-      updateChat(activeChat.id, c => ({
-        ...c,
-        messages: [...c.messages, { role: 'assistant', text: err.message || 'Der opstod en fejl. Prøv igen.' }]
-      }))
+      // Viser fejlbeskeden i den tomme AI-besked
+      updateChat(currentChatId, c => {
+        const msgs = [...c.messages]
+        msgs[msgs.length - 1] = { role: 'assistant', text: err.message || 'Der opstod en fejl. Prøv igen.' }
+        return { ...c, messages: msgs }
+      })
     } finally {
-      // Slår loading fra uanset om det lykkedes eller ej
       setLoading(false)
     }
   }
@@ -138,13 +174,11 @@ export default function App() {
   function deleteChat(id) {
     setChats(prev => {
       const remaining = prev.filter(c => c.id !== id)
-      // Hvis alle chats slettes, oprettes en ny automatisk
       if (remaining.length === 0) {
         const fresh = createNewChat()
         setActiveChatId(fresh.id)
         return [fresh]
       }
-      // Skift til den første tilgængelige chat hvis den aktive slettes
       if (id === activeChatId) setActiveChatId(remaining[0].id)
       return remaining
     })
@@ -163,11 +197,49 @@ export default function App() {
     setRenamingId(null)
   }
 
+  // Kopierer en besked til udklipsholderen
+  async function copyMessage(text) {
+    await navigator.clipboard.writeText(text)
+  }
+
   // Sender beskeden når brugeren trykker Enter (men ikke Shift+Enter)
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       sendMessage()
+    }
+  }
+
+  // Custom renderer til ReactMarkdown — viser kodeblokke med syntax highlighting
+  const markdownComponents = {
+    code({ node, inline, className, children, ...props }) {
+      const match = /language-(\w+)/.exec(className || '')
+      const language = match ? match[1] : 'text'
+      const codeString = String(children).replace(/\n$/, '')
+
+      if (!inline && match) {
+        return (
+          <div className="code-block">
+            <div className="code-header">
+              <span className="code-lang">{language}</span>
+              {/* Kopier-knap til kodeblokke */}
+              <button className="copy-code-btn" onClick={() => copyMessage(codeString)}>
+                Kopiér
+              </button>
+            </div>
+            <SyntaxHighlighter
+              style={darkMode ? oneDark : oneLight}
+              language={language}
+              PreTag="div"
+              {...props}
+            >
+              {codeString}
+            </SyntaxHighlighter>
+          </div>
+        )
+      }
+      // Inline kode (fx `variabel`)
+      return <code className={className} {...props}>{children}</code>
     }
   }
 
@@ -182,9 +254,16 @@ export default function App() {
       <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <span className="logo">ChatBot</span>
-          {/* Knap til at starte en ny chat */}
-          <button className="new-chat-btn" onClick={newChat} title="Ny chat">+</button>
+          <div className="header-actions">
+            {/* Tema-skifte knap */}
+            <button className="icon-btn" onClick={() => setDarkMode(d => !d)} title="Skift tema">
+              {darkMode ? '☀️' : '🌙'}
+            </button>
+            {/* Knap til at starte en ny chat */}
+            <button className="new-chat-btn" onClick={newChat} title="Ny chat">+</button>
+          </div>
         </div>
+
         {/* Liste over alle chats */}
         <nav className="chat-list">
           {chats.map(c => (
@@ -193,8 +272,8 @@ export default function App() {
               className={`chat-item ${c.id === activeChat.id ? 'active' : ''}`}
               onClick={() => { setActiveChatId(c.id); setSidebarOpen(false) }}
             >
-              {/* Omdøb-tilstand: vis inputfelt i stedet for titlen */}
               {renamingId === c.id ? (
+                // Omdøb-tilstand: vis inputfelt
                 <input
                   className="rename-input"
                   value={renameValue}
@@ -208,12 +287,11 @@ export default function App() {
                   onClick={e => e.stopPropagation()}
                 />
               ) : (
-                // Dobbeltklik på titlen for at omdøbe
+                // Dobbeltklik for at omdøbe
                 <span className="chat-title" onDoubleClick={e => { e.stopPropagation(); startRename(c) }}>
                   {c.title}
                 </span>
               )}
-              {/* Slet-knap — stopPropagation forhindrer at chatten også åbnes */}
               <button
                 className="delete-btn"
                 onClick={e => { e.stopPropagation(); deleteChat(c.id) }}
@@ -230,6 +308,9 @@ export default function App() {
         <div className="topbar">
           <button className="hamburger" onClick={() => setSidebarOpen(o => !o)}>☰</button>
           <span className="topbar-title">{activeChat.title}</span>
+          <button className="icon-btn" onClick={() => setDarkMode(d => !d)} title="Skift tema">
+            {darkMode ? '☀️' : '🌙'}
+          </button>
         </div>
 
         <div className="messages">
@@ -240,30 +321,37 @@ export default function App() {
               <p>Skriv en besked for at starte</p>
             </div>
           )}
-          {/* Viser alle beskeder i den aktive chat */}
+
+          {/* Viser alle beskeder */}
           {activeChat?.messages.map((msg, i) => (
             <div key={i} className={`message ${msg.role}`}>
               <div className="bubble">
                 {msg.role === 'assistant' ? (
-                  // Renderer markdown i AI's svar (fed, lister, kode osv.)
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {msg.text}
                   </ReactMarkdown>
                 ) : (
                   msg.text
                 )}
               </div>
+              {/* Kopier-knap på beskeder */}
+              {msg.text && (
+                <button className="copy-msg-btn" onClick={() => copyMessage(msg.text)} title="Kopiér">
+                  ⎘
+                </button>
+              )}
             </div>
           ))}
-          {/* Animeret loading-indikator mens AI svarer */}
-          {loading && (
+
+          {/* Blinkende cursor mens AI streamer */}
+          {loading && activeChat?.messages[activeChat.messages.length - 1]?.text === '' && (
             <div className="message assistant">
               <div className="bubble typing">
                 <span /><span /><span />
               </div>
             </div>
           )}
-          {/* Usynligt element vi scroller ned til */}
+
           <div ref={bottomRef} />
         </div>
 
@@ -271,7 +359,12 @@ export default function App() {
         <div className="input-area">
           <textarea
             value={input}
-            onChange={e => setInput(e.target.value)}
+            onChange={e => {
+              setInput(e.target.value)
+              // Auto-resize: nulstil højde og sæt til scrollHeight
+              e.target.style.height = 'auto'
+              e.target.style.height = e.target.scrollHeight + 'px'
+            }}
             onKeyDown={handleKeyDown}
             placeholder="Skriv en besked..."
             rows={1}

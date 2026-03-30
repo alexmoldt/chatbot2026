@@ -4,6 +4,7 @@
   padding: 0;
 }
 
+/* ===== LYST TEMA (standard) ===== */
 :root {
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --bg: #ffffff;
@@ -17,15 +18,29 @@
   --user-text: #ffffff;
   --assistant-bg: #f0f0f0;
   --assistant-text: #1a1a1a;
+}
 
+/* ===== MØRKT TEMA ===== */
+[data-theme='dark'] {
+  --bg: #1a1a1a;
+  --bg2: #141414;
+  --border: #2e2e2e;
+  --text: #e5e5e5;
+  --text-muted: #9ca3af;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --user-bg: #2563eb;
+  --user-text: #ffffff;
+  --assistant-bg: #262626;
+  --assistant-text: #e5e5e5;
+}
+
+body {
   font-family: var(--sans);
   font-size: 15px;
   color: var(--text);
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
-}
-
-body {
   margin: 0;
   height: 100dvh;
   overflow: hidden;
