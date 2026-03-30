@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import './App.css'
 
 // Groq API endpoint og nøgle fra .env filen
@@ -10,25 +12,45 @@ function createNewChat() {
   return { id: Date.now(), title: 'Ny chat', messages: [] }
 }
 
+// Henter chats fra localStorage, eller returnerer en ny tom chat
+function loadChats() {
+  try {
+    const saved = localStorage.getItem('chats')
+    if (saved) return JSON.parse(saved)
+  } catch {}
+  return [createNewChat()]
+}
+
 export default function App() {
-  // Liste over alle chats
-  const [chats, setChats] = useState([createNewChat()])
+  // Liste over alle chats — indlæst fra localStorage ved start
+  const [chats, setChats] = useState(loadChats)
   // ID på den chat der er åben lige nu
-  const [activeChatId, setActiveChatId] = useState(chats[0].id)
+  const [activeChatId, setActiveChatId] = useState(() => loadChats()[0].id)
   // Teksten brugeren skriver i inputfeltet
   const [input, setInput] = useState('')
   // true mens vi venter på svar fra AI
   const [loading, setLoading] = useState(false)
+  // ID på den chat der er ved at blive omdøbt (null = ingen)
+  const [renamingId, setRenamingId] = useState(null)
+  // Teksten i omdøb-feltet
+  const [renameValue, setRenameValue] = useState('')
+  // true når sidebjælken er åben på mobil
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   // Bruges til at scrolle ned til den nyeste besked automatisk
   const bottomRef = useRef(null)
 
-  // Finder den aktive chat ud fra id
-  const activeChat = chats.find(c => c.id === activeChatId)
+  // Gemmer chats i localStorage hver gang de ændrer sig
+  useEffect(() => {
+    localStorage.setItem('chats', JSON.stringify(chats))
+  }, [chats])
 
   // Scroller ned til bunden hver gang der kommer en ny besked
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [activeChat?.messages])
+  }, [chats, activeChatId])
+
+  // Finder den aktive chat ud fra id
+  const activeChat = chats.find(c => c.id === activeChatId) ?? chats[0]
 
   // Opdaterer en specifik chat ved hjælp af en updater-funktion
   function updateChat(id, updater) {
@@ -44,9 +66,10 @@ export default function App() {
     const userMsg = { role: 'user', text }
     setInput('')
     setLoading(true)
+    setSidebarOpen(false) // Luk sidebjælken på mobil når man sender
 
     // Tilføjer brugerens besked til chatten og sætter titlen på den første besked
-    updateChat(activeChatId, c => ({
+    updateChat(activeChat.id, c => ({
       ...c,
       title: c.messages.length === 0 ? text.slice(0, 30) : c.title,
       messages: [...c.messages, userMsg]
@@ -71,8 +94,8 @@ export default function App() {
           messages: [
             // System-prompt: fortæller AI'en at den skal svare på dansk
             { role: 'system', content: 'Du er en hjælpsom assistent. Svar altid på dansk, uanset hvilket sprog brugeren skriver på.' },
-            ...history,               // Tidligere beskeder i samtalen
-            { role: 'user', content: text } // Den nye besked fra brugeren
+            ...history,                      // Tidligere beskeder i samtalen
+            { role: 'user', content: text }  // Den nye besked fra brugeren
           ]
         })
       })
@@ -87,13 +110,13 @@ export default function App() {
       const reply = data.choices?.[0]?.message?.content ?? 'Ingen svar modtaget.'
 
       // Tilføjer AI'ens svar til chatten
-      updateChat(activeChatId, c => ({
+      updateChat(activeChat.id, c => ({
         ...c,
         messages: [...c.messages, { role: 'assistant', text: reply }]
       }))
     } catch (err) {
       // Viser fejlbeskeden i chatten hvis noget gik galt
-      updateChat(activeChatId, c => ({
+      updateChat(activeChat.id, c => ({
         ...c,
         messages: [...c.messages, { role: 'assistant', text: err.message || 'Der opstod en fejl. Prøv igen.' }]
       }))
@@ -108,6 +131,7 @@ export default function App() {
     const chat = createNewChat()
     setChats(prev => [chat, ...prev])
     setActiveChatId(chat.id)
+    setSidebarOpen(false)
   }
 
   // Sletter en chat — hvis den slettede er aktiv, skiftes til en anden
@@ -126,6 +150,19 @@ export default function App() {
     })
   }
 
+  // Starter omdøbning af en chat
+  function startRename(chat) {
+    setRenamingId(chat.id)
+    setRenameValue(chat.title)
+  }
+
+  // Gemmer det nye navn på chatten
+  function confirmRename(id) {
+    const trimmed = renameValue.trim()
+    if (trimmed) updateChat(id, c => ({ ...c, title: trimmed }))
+    setRenamingId(null)
+  }
+
   // Sender beskeden når brugeren trykker Enter (men ikke Shift+Enter)
   function handleKeyDown(e) {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -136,8 +173,13 @@ export default function App() {
 
   return (
     <div className="layout">
+      {/* Mørkt overlay bag sidebjælken på mobil */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
+
       {/* Sidebjælke med chat-historik */}
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-header">
           <span className="logo">ChatBot</span>
           {/* Knap til at starte en ny chat */}
@@ -148,10 +190,29 @@ export default function App() {
           {chats.map(c => (
             <div
               key={c.id}
-              className={`chat-item ${c.id === activeChatId ? 'active' : ''}`}
-              onClick={() => setActiveChatId(c.id)}
+              className={`chat-item ${c.id === activeChat.id ? 'active' : ''}`}
+              onClick={() => { setActiveChatId(c.id); setSidebarOpen(false) }}
             >
-              <span className="chat-title">{c.title}</span>
+              {/* Omdøb-tilstand: vis inputfelt i stedet for titlen */}
+              {renamingId === c.id ? (
+                <input
+                  className="rename-input"
+                  value={renameValue}
+                  autoFocus
+                  onChange={e => setRenameValue(e.target.value)}
+                  onBlur={() => confirmRename(c.id)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') confirmRename(c.id)
+                    if (e.key === 'Escape') setRenamingId(null)
+                  }}
+                  onClick={e => e.stopPropagation()}
+                />
+              ) : (
+                // Dobbeltklik på titlen for at omdøbe
+                <span className="chat-title" onDoubleClick={e => { e.stopPropagation(); startRename(c) }}>
+                  {c.title}
+                </span>
+              )}
               {/* Slet-knap — stopPropagation forhindrer at chatten også åbnes */}
               <button
                 className="delete-btn"
@@ -165,6 +226,12 @@ export default function App() {
 
       {/* Hoved chat-område */}
       <main className="chat-area">
+        {/* Topbar med hamburger-menu på mobil */}
+        <div className="topbar">
+          <button className="hamburger" onClick={() => setSidebarOpen(o => !o)}>☰</button>
+          <span className="topbar-title">{activeChat.title}</span>
+        </div>
+
         <div className="messages">
           {/* Velkomstskærm når chatten er tom */}
           {activeChat?.messages.length === 0 && (
@@ -176,7 +243,16 @@ export default function App() {
           {/* Viser alle beskeder i den aktive chat */}
           {activeChat?.messages.map((msg, i) => (
             <div key={i} className={`message ${msg.role}`}>
-              <div className="bubble">{msg.text}</div>
+              <div className="bubble">
+                {msg.role === 'assistant' ? (
+                  // Renderer markdown i AI's svar (fed, lister, kode osv.)
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {msg.text}
+                  </ReactMarkdown>
+                ) : (
+                  msg.text
+                )}
+              </div>
             </div>
           ))}
           {/* Animeret loading-indikator mens AI svarer */}
